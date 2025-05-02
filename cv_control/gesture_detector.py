@@ -26,6 +26,9 @@ class HandGestureDetector(Node):
     def __init__(self):
         super().__init__("hand_gesture_detector")
 
+        self.simulation = True
+        self.get_logger().info(f"SIMULATION MODE: << {'on' if self.simulation else 'off'} >>")
+
         # Внутренние параметры камеры
         self.camera_fx = None
         self.camera_fy = None
@@ -77,6 +80,7 @@ class HandGestureDetector(Node):
         self.last_depth_frame = None
 
         # Визуализация управления
+        self.show_camera_processing = False
         self.control_panel_size = 600
         self.control_panel_height = self.control_panel_size
         self.control_panel_width = int(1.8 * self.control_panel_size)
@@ -150,14 +154,15 @@ class HandGestureDetector(Node):
     def process_frame(self):
         color_im = np.copy(self.last_color_frame)
         depth_im = np.copy(self.last_depth_frame)
-        image_h, image_w, _ = color_im.shape
 
         results = self.hands.process(cv2.cvtColor(color_im, cv2.COLOR_BGR2RGB))
         if results.multi_hand_landmarks:
             for hand_landmarks in results.multi_hand_landmarks:
-                self.mp_draw.draw_landmarks(
-                    color_im, hand_landmarks, self.mp_hands.HAND_CONNECTIONS
-                )
+
+                if self.show_camera_processing:
+                    self.mp_draw.draw_landmarks(
+                        color_im, hand_landmarks, self.mp_hands.HAND_CONNECTIONS
+                    )
                 
                 # Извлечение ключевых точек для предсказания жеста
                 landmarks = []
@@ -176,33 +181,36 @@ class HandGestureDetector(Node):
                 gesture_id = np.argmax(self.model.predict(landmarks_norm)) + 1
                 
                 # Визуализация
-                cv2.putText(
-                    color_im, f"Gesture: {gesture_id} ({self.sign_names[gesture_id]})", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2
-                )
+                if self.show_camera_processing:
+                    cv2.putText(
+                        color_im, f"Gesture: {gesture_id} ({self.sign_names[gesture_id]})", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2
+                    )
                 
                 # Управление дроном
                 throttle, roll, pitch, yaw = self.calculate_angles(hand_landmarks, depth_im)
                 t, p, r, y = self.publish_command(gesture_id, throttle, roll, pitch, yaw)
                 t, p, r, y = round(t, 2), round(p, 2), round(r, 2), round(y, 2)
+
+                if self.show_camera_processing:
+                    cv2.putText(
+                        color_im, f"Throttle = {t}, pitch = {p}, roll = {r}, yaw = {y}",
+                        (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2
+                    )
+        else:
+            if self.show_camera_processing:
                 cv2.putText(
-                    color_im, 
-                    f"Throttle = {t}, pitch = {p}, roll = {r}, yaw = {y}",
-                    (10, 100),
+                    color_im, f"NO CONTROL", (10, 100),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2
                 )
-        else:
-            cv2.putText(
-                color_im, f"NO CONTROL", (10, 100),
-                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2
-            )
             self.publish_command(   # Дрон висит в воздухе если нет команд
                 1, 
                 10 * (self.max_palm_height + self.min_palm_height) / 2, 
                 0, 0, 0
             )
 
-        cv2.imshow("Hand Tracking", color_im)
+        if self.show_camera_processing:
+            cv2.imshow("Hand Tracking", color_im)
 
         cv2.imshow("Control Panel", self.control_panel)
 
@@ -357,7 +365,7 @@ class HandGestureDetector(Node):
         # Передача управления на коптер
         cmd.linear.z = float(throttle)
         cmd.linear.x = float(pitch)
-        cmd.linear.y = float(roll)
+        cmd.linear.y = float(roll) if not self.simulation else -float(roll)
         cmd.angular.z = float(yaw)
 
         self.cmd_pub.publish(cmd)
