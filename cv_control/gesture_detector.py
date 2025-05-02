@@ -6,11 +6,8 @@ import cv2
 import mediapipe as mp
 import numpy as np
 from geometry_msgs.msg import Twist
-from cv_control.utils import ValueFilter, load_keras_model
+from cv_control.utils import ValueFilter, PlotWatcher, load_keras_model
 import math
-import matplotlib.pyplot as plt
-from collections import deque
-from rclpy.qos import qos_profile_sensor_data
 
 #        8   12  16  20
 #        |   |   |   |
@@ -40,8 +37,8 @@ class HandGestureDetector(Node):
             5: 'five', 6: 'ok', 7: 'rock', 8: 'thumbs_up'
         }
 
-        self.min_angle_degrees = 10 # Минимальное значение эйлерова угла
-        self.max_angle_degrees = 35 # Максимальное значение эйлерова угла
+        self.min_angle_degrees = 5 # Минимальное значение эйлерова угла
+        self.max_angle_degrees = 30 # Максимальное значение эйлерова угла
         self.min_palm_height = 15   # Минимальное расстояние от камеры в сантиметрах
         self.max_palm_height = 60   # Максимальное расстояние от камеры в сантиметрах
         self.speed = 1
@@ -49,7 +46,7 @@ class HandGestureDetector(Node):
         # Загрузка модели и скалера
         # self.model, self.scaler = load_keras_model()
         self.model = load_keras_model()
-        self.get_logger().info("MODEL INITIALIZED: " + str(type(self.model)))
+        self.get_logger().info("MODEL CREATED: " + str(type(self.model)))
         
         # Подписки
         self.sub_camera_info = self.create_subscription(
@@ -62,18 +59,18 @@ class HandGestureDetector(Node):
             # Image, "/camera/camera/depth/image_rect_raw", self.depth_callback, 10
             Image, "/camera/camera/aligned_depth_to_color/image_raw", self.depth_callback, 10
         )
-        self.get_logger().info("SUBSCRIPTIONS CREATED!")
+        self.get_logger().info("SUBSCRIPTIONS CREATED")
 
         # Паблишеры
         self.cmd_pub = self.create_publisher(Twist, "/X3/cmd_vel", 10)
-        self.get_logger().info("PUBLISHERS CREATED!")
+        self.get_logger().info("PUBLISHERS CREATED")
         
         # MediaPipe
         self.mp_hands = mp.solutions.hands
         self.hands = self.mp_hands.Hands(max_num_hands=1)
         self.mp_draw = mp.solutions.drawing_utils
         self.cv_bridge = CvBridge()
-        self.get_logger().info("HAND DETECTOR INITIALIZED!")
+        self.get_logger().info("HAND DETECTOR CREATED")
 
         # Для синхронизации
         self.last_color_frame = None
@@ -85,15 +82,44 @@ class HandGestureDetector(Node):
         self.control_panel_width = int(1.8 * self.control_panel_size)
         self.control_panel = None
         self.update_control_panel(0, 0, 0, 0)
-        self.get_logger().info("CONTROL PANEL INITIALIZED!")
+        self.get_logger().info("CONTROL PANEL CREATED")
 
         # Для фильтрации данных
-        window_size = 10
-        self.throttle_filter = ValueFilter(window_size, 0.1)
-        self.roll_filter = ValueFilter(window_size, 0.2)
-        self.pitch_filter = ValueFilter(window_size, 0.2)
-        self.yaw_filter = ValueFilter(window_size, 0.2)
-        self.get_logger().info("CONTROL FILTERS INITIALIZED!")
+        filter_window_size = 5
+        self.throttle_filter = ValueFilter(filter_window_size, 0.5)
+        self.roll_filter = ValueFilter(filter_window_size, 0.5)
+        self.pitch_filter = ValueFilter(filter_window_size, 0.5)
+        self.yaw_filter = ValueFilter(filter_window_size, 0.5)
+        self.get_logger().info("CONTROL FILTERS CREATED")
+
+        # Для мониторинга данных
+        self.control_monitoring_on = False  # Включаеет/Выключает графики управления
+        control_plot_window_size = 20
+        self.throttle_watcher = PlotWatcher(
+            ["Raw data", "Filtered data"],
+            control_plot_window_size, figsize=(8, 4),
+            plot_title="Throttle watcher"
+        )
+        self.roll_watcher = PlotWatcher(
+            ["Raw data", "Filtered data"],
+            control_plot_window_size, figsize=(8, 4),
+            plot_title="Roll watcher"
+        )
+        self.pitch_watcher = PlotWatcher(
+            ["Raw data", "Filtered data"],
+            control_plot_window_size, figsize=(8, 4),
+            plot_title="Pitch watcher"
+        )
+        self.yaw_watcher = PlotWatcher(
+            ["Raw data", "Filtered data"],
+            control_plot_window_size, figsize=(8, 4),
+            plot_title="Yaw watcher"
+        )
+        self.throttle_plot = None
+        self.roll_plot = None
+        self.pitch_plot = None
+        self.yaw_plot = None
+        self.get_logger().info("DATA WATCHERS CREATED")
 
     def camera_info_callback(self, msg):
         K_matrix = np.array(msg.k).reshape(3, 3)
@@ -177,7 +203,18 @@ class HandGestureDetector(Node):
             )
 
         cv2.imshow("Hand Tracking", color_im)
+
         cv2.imshow("Control Panel", self.control_panel)
+
+        if self.throttle_plot is not None:
+            cv2.imshow("Throttle watcher", self.throttle_plot)
+        if self.roll_plot is not None:
+            cv2.imshow("Roll watcher", self.roll_plot)
+        if self.pitch_plot is not None:
+            cv2.imshow("Pitch watcher", self.pitch_plot)
+        if self.yaw_plot is not None:
+            cv2.imshow("Yaw watcher", self.yaw_plot)
+
         cv2.waitKey(1)
 
     def find_3d_angle(self, A: np.array, B: np.array, dA: np.array, dB: np.array, degrees=True) -> float:
@@ -262,8 +299,6 @@ class HandGestureDetector(Node):
 
         # Расчет газа (throttle), Z-координата середины ладони
         throttle = depth_im[int(middle_point[1]), int(middle_point[0])].astype(float)
-
-        self.get_logger().info(f"ГАЗ: {throttle}, КРЕН: {roll}, ТАНГАЖ: {pitch}, РЫСКАНИЕ: {yaw}")
         
         return throttle, roll, pitch, yaw
     
@@ -291,12 +326,19 @@ class HandGestureDetector(Node):
         yaw = self.normalize_value(yaw, -self.max_angle_degrees, self.max_angle_degrees)
 
         # Сглаживание управления
-        roll = self.roll_filter.update(roll)
-        pitch = self.pitch_filter.update(pitch)
-        yaw = self.yaw_filter.update(yaw)
-        throttle = self.throttle_filter.update(throttle)
+        filtered_roll = self.roll_filter.update(roll)
+        filtered_pitch = self.pitch_filter.update(pitch)
+        filtered_yaw = self.yaw_filter.update(yaw)
+        filtered_throttle = self.throttle_filter.update(throttle)
 
-        return throttle, roll, pitch, yaw
+        # Мониторинг управления
+        if self.control_monitoring_on:
+            self.throttle_plot = self.throttle_watcher.update(throttle, filtered_throttle)
+            self.roll_plot = self.roll_watcher.update(roll, filtered_roll)
+            self.pitch_plot = self.pitch_watcher.update(pitch, filtered_pitch)
+            self.yaw_plot = self.yaw_watcher.update(yaw, filtered_yaw)
+
+        return filtered_throttle, filtered_roll, filtered_pitch, filtered_yaw
     
     def publish_command(self, gesture_id, throttle, roll, pitch, yaw):
         cmd = Twist()
