@@ -58,11 +58,14 @@ class PlotWatcher:
         # Рисование графика
         plt.figure(figsize=self.figsize, dpi=100)
         plt.title(self.plot_title, fontsize=14)
-        plt.xlabel('t', fontsize=12)
-        plt.ylabel('Values', fontsize=12)
+        plt.xlabel('Время, мс', fontsize=12)
+        plt.ylabel('Значение', fontsize=12)
         plt.xticks([])  # Скрыть все метки оси X
         for i, window in enumerate(self.value_windows):
-            plt.plot(self.t_range[:len(window)], window, linewidth=2, label=self.values_titles[i])
+            if i % 2 == 0:
+                plt.plot(self.t_range[:len(window)], window, linewidth=2, label=self.values_titles[i], linestyle='--')
+            else:
+                plt.plot(self.t_range[:len(window)], window, linewidth=2, label=self.values_titles[i])
         plt.legend()
         plt.grid(True, linestyle='--')
 

@@ -59,13 +59,12 @@ class HandGestureDetector(Node):
             Image, "/camera/camera/color/image_raw", self.color_callback, 10
         )
         self.sub_depth = self.create_subscription(
-            # Image, "/camera/camera/depth/image_rect_raw", self.depth_callback, 10
             Image, "/camera/camera/aligned_depth_to_color/image_raw", self.depth_callback, 10
         )
         self.get_logger().info("SUBSCRIPTIONS CREATED")
 
         # Паблишеры
-        self.cmd_pub = self.create_publisher(Twist, "/X3/cmd_vel", 10)
+        self.cmd_pub = self.create_publisher(Twist, "/x500/cmd_vel", 10)
         self.get_logger().info("PUBLISHERS CREATED")
         
         # MediaPipe
@@ -80,7 +79,7 @@ class HandGestureDetector(Node):
         self.last_depth_frame = None
 
         # Визуализация управления
-        self.show_camera_processing = False
+        self.show_camera_processing = True
         self.control_panel_size = 600
         self.control_panel_height = self.control_panel_size
         self.control_panel_width = int(1.8 * self.control_panel_size)
@@ -97,26 +96,26 @@ class HandGestureDetector(Node):
         self.get_logger().info("CONTROL FILTERS CREATED")
 
         # Для мониторинга данных
-        self.control_monitoring_on = False  # Включаеет/Выключает графики управления
-        control_plot_window_size = 20
+        self.control_monitoring_on = False  # Включает/Выключает графики управления
+        self.control_plot_window_size = 100
         self.throttle_watcher = PlotWatcher(
             ["Raw data", "Filtered data"],
-            control_plot_window_size, figsize=(8, 4),
+            self.control_plot_window_size, figsize=(8, 4),
             plot_title="Throttle watcher"
         )
         self.roll_watcher = PlotWatcher(
             ["Raw data", "Filtered data"],
-            control_plot_window_size, figsize=(8, 4),
+            self.control_plot_window_size, figsize=(8, 4),
             plot_title="Roll watcher"
         )
         self.pitch_watcher = PlotWatcher(
             ["Raw data", "Filtered data"],
-            control_plot_window_size, figsize=(8, 4),
+            self.control_plot_window_size, figsize=(8, 4),
             plot_title="Pitch watcher"
         )
         self.yaw_watcher = PlotWatcher(
             ["Raw data", "Filtered data"],
-            control_plot_window_size, figsize=(8, 4),
+            self.control_plot_window_size, figsize=(8, 4),
             plot_title="Yaw watcher"
         )
         self.throttle_plot = None
